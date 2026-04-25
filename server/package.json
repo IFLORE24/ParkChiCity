@@ -1,0 +1,24 @@
+{
+  "name": "park-chi-city-server",
+  "version": "1.0.0",
+  "description": "Backend API for ParkChiCity — serves Chicago permit zone and street data",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "seed:streets": "node scripts/seedChicagoStreets.js",
+    "seed:permits": "node scripts/seedStreets.js"
+  },
+  "dependencies": {
+    "@turf/boolean-point-in-polygon": "^7.3.5",
+    "@turf/helpers": "^7.3.5",
+    "compression": "^1.8.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.20.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
