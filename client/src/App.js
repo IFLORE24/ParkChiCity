@@ -20,62 +20,33 @@ function App() {
       zoom: 14
     });
 
-    map.current.on('load', () => {
-      Promise.all([
-        fetch(`${process.env.REACT_APP_API_URL}/api/streets`).then(res => res.json()),
-        fetch(`${process.env.REACT_APP_API_URL}/api/street-geometry`).then(res => res.json())
-      ]).then(([streetsGeoJSON, permitGeoJSON]) => {
-        console.log('Loaded streets:', streetsGeoJSON.features.length);
-        console.log('Loaded permit zones:', permitGeoJSON.features.length);
+    map.current.on('load', async () => {
+      try {
+        const res = await fetch('/permit-city.geojson');
+        if (!res.ok) throw new Error(`Failed to load permit layer (${res.status})`);
+        const geojson = await res.json();
+        console.log('Permit segments:', geojson.features.length);
 
-        // === Base layer: all Chicago streets ===
-        map.current.addSource('chicago-streets', {
-          type: 'geojson',
-          data: streetsGeoJSON
-        });
+        map.current.addSource('permit-streets', { type: 'geojson', data: geojson });
 
         map.current.addLayer({
-          id: 'chicago-streets-layer',
+          id: 'permit-streets-layer',
           type: 'line',
-          source: 'chicago-streets',
+          source: 'permit-streets',
           paint: {
-            'line-color': '#6b7785',
-            'line-width': 1,
-            'line-opacity': 0.7
-          }
-        });
-
-        // === Overlay: permit zones ===
-        map.current.addSource('permit-zones', {
-          type: 'geojson',
-          data: permitGeoJSON
-        });
-
-        // Invisible wide touch target (kept for future click handling)
-        map.current.addLayer({
-          id: 'permit-zones-touch',
-          type: 'line',
-          source: 'permit-zones',
-          paint: {
-            'line-color': 'transparent',
-            'line-width': 20
-          }
-        });
-
-        // Visible red line
-        map.current.addLayer({
-          id: 'permit-zones-layer',
-          type: 'line',
-          source: 'permit-zones',
-          paint: {
-            'line-color': '#FF4444',
+            'line-color': [
+              'case',
+              ['all', ['==', ['get', 'odd_hit'], true], ['==', ['get', 'even_hit'], true]],
+              '#FF4444', // both sides restricted: red
+              '#FFD400'  // only one side restricted: yellow
+            ],
             'line-width': 3,
-            'line-opacity': 0.8
+            'line-opacity': 0.85
           }
         });
-      }).catch(err => {
-        console.error('Failed to load map data:', err);
-      });
+      } catch (err) {
+        console.error('Failed to load permit layer:', err);
+      }
     });
   }, []);
 

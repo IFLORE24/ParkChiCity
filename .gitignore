@@ -33,3 +33,5 @@ Thumbs.db
 
 # Backup folder (we created this earlier as a safety net)
 park-chi-city-backup/
+
+/data/
