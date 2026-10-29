@@ -6,6 +6,8 @@ import AboutPage from './components/AboutPage';
 
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN;
 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+
 // Rough bounding box around Chicago: west, south, east, north
 const CHICAGO_BBOX = [-87.95, 41.6, -87.5, 42.05];
 
@@ -13,6 +15,14 @@ const CHICAGO_BBOX = [-87.95, 41.6, -87.5, 42.05];
 const MAX_DISTANCE_M = 35;
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
+
+// Values must match REPORT_TYPES in server/constants.js
+const REPORT_TYPE_OPTIONS = [
+  { value: 'wrong_zone', label: 'The permit zone shown is wrong' },
+  { value: 'missing_zone', label: 'A permit zone is missing here' },
+  { value: 'zone_removed', label: 'This zone no longer exists' },
+  { value: 'other', label: 'Something else' }
+];
 
 // ---------- geometry helpers ----------
 function flattenLines(geometry) {
@@ -69,7 +79,7 @@ function findNearestPermit(point, permitData) {
 
 function sidesText(p) {
   if (p.odd_hit && p.even_hit) return 'Both sides of the street';
-  if (p.odd_hit) return 'One side of the street. Please check the posted signs.';
+  if (p.odd_hit) return 'Odd-numbered side only';
   return 'Even-numbered side only';
 }
 
@@ -92,6 +102,13 @@ function App() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+
+  // Report form state
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportType, setReportType] = useState('wrong_zone');
+  const [reportNote, setReportNote] = useState('');
+  const [reportStatus, setReportStatus] = useState('idle'); // idle | sending | sent | error
+  const [reportError, setReportError] = useState('');
 
   useEffect(() => {
     if (map.current) return;
@@ -120,7 +137,7 @@ function App() {
               'case',
               ['all', ['==', ['get', 'odd_hit'], true], ['==', ['get', 'even_hit'], true]],
               '#FF4444', // both sides restricted: red
-              '#ffd400'  // only one side restricted: yellow
+              '#FFD400'  // only one side restricted: yellow
             ],
             'line-width': 3,
             'line-opacity': 0.85
@@ -148,6 +165,14 @@ function App() {
     });
   }, []);
 
+  function resetReport() {
+    setReportOpen(false);
+    setReportType('wrong_zone');
+    setReportNote('');
+    setReportStatus('idle');
+    setReportError('');
+  }
+
   function clearSearch() {
     if (marker.current) {
       marker.current.remove();
@@ -156,6 +181,7 @@ function App() {
     const source = map.current && map.current.getSource('selected-segment');
     if (source) source.setData(EMPTY);
     setResult(null);
+    resetReport();
   }
 
   async function handleSearch(e) {
@@ -165,6 +191,7 @@ function App() {
 
     setLoading(true);
     setResult(null);
+    resetReport();
 
     try {
       const url =
@@ -197,10 +224,10 @@ function App() {
 
       if (match) {
         if (selected) selected.setData({ type: 'FeatureCollection', features: [match.feature] });
-        setResult({ kind: 'permit', address, match });
+        setResult({ kind: 'permit', address, coords: [lon, lat], match });
       } else {
         if (selected) selected.setData(EMPTY);
-        setResult({ kind: 'none', address });
+        setResult({ kind: 'none', address, coords: [lon, lat] });
       }
     } catch (err) {
       console.error('Search failed:', err);
@@ -210,12 +237,69 @@ function App() {
     }
   }
 
+  async function submitReport(e) {
+    e.preventDefault();
+    if (!result || !result.coords || reportStatus === 'sending') return;
+
+    const p = result.kind === 'permit' ? result.match.feature.properties : null;
+    const payload = {
+      address: result.address,
+      location: { type: 'Point', coordinates: result.coords },
+      reportType,
+      note: reportNote.trim(),
+      appResult: {
+        zones: p ? String(p.zones || '') : '',
+        oddHit: p ? !!p.odd_hit : false,
+        evenHit: p ? !!p.even_hit : false
+      }
+    };
+
+    setReportStatus('sending');
+    setReportError('');
+
+    try {
+      const res = await fetch(`${API_URL}/api/reports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.status === 201) {
+        setReportStatus('sent');
+        setReportOpen(false);
+        return;
+      }
+
+      let message = 'Could not send your report. Please try again.';
+      if (res.status === 429) {
+        message = 'Too many reports from your connection. Please try again later.';
+      } else if (res.status === 400) {
+        try {
+          const body = await res.json();
+          if (Array.isArray(body.details) && body.details.length) {
+            message = body.details.join('. ');
+          }
+        } catch (parseErr) {
+          // keep the generic message
+        }
+      }
+      setReportError(message);
+      setReportStatus('error');
+    } catch (err) {
+      console.error('Report failed:', err);
+      setReportError('Could not reach the server. Please try again later.');
+      setReportStatus('error');
+    }
+  }
+
   const cardStyle = {
     position: 'absolute',
     left: 'calc(260px + 16px)',
     bottom: 24,
     width: 340,
     maxWidth: 'calc(100vw - 292px)',
+    maxHeight: 'calc(100vh - 120px)',
+    overflowY: 'auto',
     background: '#fff',
     color: '#1b1f27',
     borderRadius: 10,
@@ -225,6 +309,27 @@ function App() {
     lineHeight: 1.4,
     zIndex: 5
   };
+
+  const linkButton = {
+    background: 'none',
+    border: 'none',
+    color: '#1a73e8',
+    cursor: 'pointer',
+    padding: 0,
+    fontSize: 13
+  };
+
+  const fieldStyle = {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '8px 10px',
+    borderRadius: 6,
+    border: '1px solid #c9ced6',
+    fontSize: 14,
+    fontFamily: 'inherit'
+  };
+
+  const canReport = result && (result.kind === 'permit' || result.kind === 'none');
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
@@ -314,25 +419,88 @@ function App() {
             <div>Something went wrong with the search. Please try again.</div>
           )}
 
-          {(result.kind === 'permit' || result.kind === 'none') && (
+          {canReport && (
             <div style={{ color: '#777', fontSize: 12, marginTop: 8 }}>
               This match is approximate and covers residential permit zones only. Always check
               the posted signs.
             </div>
           )}
-          <button
-            type="button"
-            onClick={clearSearch}
-            style={{
-              marginTop: 8,
-              background: 'none',
-              border: 'none',
-              color: '#1a73e8',
-              cursor: 'pointer',
-              padding: 0,
-              fontSize: 13
-            }}
-          >
+
+          {canReport && reportStatus === 'sent' && (
+            <div style={{ marginTop: 10, color: '#2e7d32', fontWeight: 600 }}>
+              Thanks. Your report was submitted for review.
+            </div>
+          )}
+
+          {canReport && reportStatus !== 'sent' && !reportOpen && (
+            <div style={{ marginTop: 10 }}>
+              <button type="button" onClick={() => setReportOpen(true)} style={linkButton}>
+                Report a problem with this result
+              </button>
+            </div>
+          )}
+
+          {canReport && reportOpen && (
+            <form onSubmit={submitReport} style={{ marginTop: 10 }}>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
+                What's wrong?
+              </label>
+              <select
+                value={reportType}
+                onChange={e => setReportType(e.target.value)}
+                style={fieldStyle}
+              >
+                {REPORT_TYPE_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+
+              <label style={{ display: 'block', fontSize: 13, margin: '10px 0 4px' }}>
+                Details (optional)
+              </label>
+              <textarea
+                value={reportNote}
+                onChange={e => setReportNote(e.target.value)}
+                maxLength={500}
+                rows={3}
+                placeholder="For example: signs on this block say Zone 142."
+                style={{ ...fieldStyle, resize: 'vertical' }}
+              />
+              <div style={{ color: '#777', fontSize: 12, marginTop: 2 }}>
+                Please don't include names or other personal information.
+              </div>
+
+              {reportStatus === 'error' && (
+                <div style={{ color: '#c62828', marginTop: 8 }}>{reportError}</div>
+              )}
+
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 10 }}>
+                <button
+                  type="submit"
+                  disabled={reportStatus === 'sending'}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: '#1a73e8',
+                    color: '#fff',
+                    fontSize: 14,
+                    cursor: reportStatus === 'sending' ? 'default' : 'pointer',
+                    opacity: reportStatus === 'sending' ? 0.7 : 1
+                  }}
+                >
+                  {reportStatus === 'sending' ? 'Sending…' : 'Send report'}
+                </button>
+                <button type="button" onClick={resetReport} style={linkButton}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
+          <button type="button" onClick={clearSearch} style={{ ...linkButton, marginTop: 10 }}>
             Clear
           </button>
         </div>
