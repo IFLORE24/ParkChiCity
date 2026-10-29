@@ -120,7 +120,7 @@ function App() {
               'case',
               ['all', ['==', ['get', 'odd_hit'], true], ['==', ['get', 'even_hit'], true]],
               '#FF4444', // both sides restricted: red
-              '#FFD400'  // only one side restricted: yellow
+              '#ffd400'  // only one side restricted: yellow
             ],
             'line-width': 3,
             'line-opacity': 0.85
