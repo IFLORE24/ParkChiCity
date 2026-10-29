@@ -47,8 +47,8 @@ function Sidebar({ onAboutClick }) {
           <span style={{ fontSize: '14px' }}>Permit Zone</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: '24px', height: '4px', backgroundColor: '#6b7785', borderRadius: '2px' }} />
-          <span style={{ fontSize: '14px' }}>Non-Permit Streets</span>
+          <div style={{ width: '24px', height: '4px', backgroundColor: '#ffd400', borderRadius: '2px' }} />
+          <span style={{ fontSize: '14px' }}>Permit Zone on one side. Check posted signs.</span>
         </div>
       </div>
 
